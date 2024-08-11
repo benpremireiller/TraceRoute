@@ -185,6 +185,18 @@ class IcmpHelperLibrary:
         def setIcmpReplyPacket(self, replyPacket):
             self.__icmpReplyPacket = replyPacket
 
+        @classmethod
+        def incrementPacketsSent(cls):
+            cls.__packetsSent += 1
+
+        @classmethod
+        def incrementRepliesReceived(cls):
+            cls.__repliesReceived += 1
+
+        @classmethod
+        def appendRTT(cls, rtt):
+            cls.__rttTimes.append(rtt)
+
         # ############################################################################################################ #
         # IcmpPacket Class Private Functions                                                                           #
         #                                                                                                              #
@@ -259,11 +271,16 @@ class IcmpHelperLibrary:
             self.__recalculateChecksum()        # Result will set new checksum value
             self.__packHeader()                 # Header is rebuilt to include new checksum value
 
-        def __validateIcmpReplyPacketWithOriginalPingData(self, icmpReplyPacket):
+        def __validateIcmpReplyPacketWithOriginalPingData(self):
             # Hint: Work through comparing each value and identify if this is a valid response.
 
+            print("validateIcmpReplyPacket Started...") if self.__DEBUG_IcmpPacket else 0
+
+            icmpReplyPacket = self.__icmpReplyPacket
+
+            # Assume packet integrity
             allValid = True
-            # Check for packet integrity
+
             if self.getDataRaw() == icmpReplyPacket.getIcmpData():
                 icmpReplyPacket.setIcmpDataIsValid(True)
             else:
@@ -292,7 +309,6 @@ class IcmpHelperLibrary:
             if allValid:
                 icmpReplyPacket.setIsValidResponse(True)
 
-
         # ############################################################################################################ #
         # IcmpPacket Class Public Functions                                                                            #
         #                                                                                                              #
@@ -317,7 +333,7 @@ class IcmpHelperLibrary:
             mySocket.setsockopt(IPPROTO_IP, IP_TTL, struct.pack('I', self.getTtl()))  # Unsigned int - 4 bytes
             try:
                 mySocket.sendto(b''.join([self.__header, self.__data]), (self.__destinationIpAddress, 0))
-                self.__packetsSent += 1 # Class scoped variable
+                self.incrementPacketsSent() # Class scoped variable
                 self.setIcmpReplyPacket(None)
                 timeLeft = 5
                 pingStartTime = time.time()
@@ -338,15 +354,16 @@ class IcmpHelperLibrary:
                     # Fetch the ICMP type and code from the received packet
                     icmpType, icmpCode = recvPacket[20:22]
 
-                    self.__repliesReceived += 1 # Class scoped variable
+                    self.incrementRepliesReceived() # Class scoped variable
 
                     # Print the reply code description
                     replyCodeName = IcmpHelperLibrary._icmpReplyCodes.get(icmpType, {}).get(icmpCode, "Unknown Code/Type")
 
                     icmpReplyPacket = IcmpHelperLibrary.IcmpPacket_EchoReply(recvPacket)
                     self.setIcmpReplyPacket(icmpReplyPacket)
-                    RTT = (timeReceived - pingStartTime) * 1000
-                    self.__rttTimes.append(RTT)
+
+                    RTT = (timeReceived - pingStartTime) * 1000 # RTT in milliseconds
+                    self.appendRTT(RTT)
 
                     if icmpType == 11:                          # Time Exceeded
                         print("  TTL=%d    RTT=%.0f ms    Type=%d    Code=%d    (%s)    %s" %
@@ -374,15 +391,14 @@ class IcmpHelperLibrary:
 
                     elif icmpType == 0:                         # Echo Reply
 
-                        self.__validateIcmpReplyPacketWithOriginalPingData(icmpReplyPacket)
-
+                        self.__validateIcmpReplyPacketWithOriginalPingData()
                         icmpReplyPacket.printResultToConsole(self.getTtl(), RTT, addr)
                         return      # Echo reply is the end and therefore should return
 
                     else:
                         print("error")
             except timeout:
-                print("  *        *        *        *        *    Request timed out (By Exception).")
+                print("   *        *        *        *        *    Request timed out (By Exception).")
             finally:
                 mySocket.close()
 
@@ -548,8 +564,6 @@ class IcmpHelperLibrary:
         # ############################################################################################################ #
         def printResultToConsole(self, ttl, RTT, addr):
 
-            # TODO Add print statements comparing the expected vs actual results
-
             print("  TTL=%d    RTT=%.0f ms    Type=%d    Code=%d        Identifier=%d    Sequence Number=%d    %s" %
                   (
                       ttl,
@@ -587,16 +601,17 @@ class IcmpHelperLibrary:
     #                                                                                                                  #
     # ################################################################################################################ #
 
+
     def __calculateAndPrintPingStatistics(self):
 
         packetsSent = IcmpHelperLibrary.IcmpPacket.getPacketsSent()
         repliesReceived = IcmpHelperLibrary.IcmpPacket.getRepliesReceived()
         rttTimes = IcmpHelperLibrary.IcmpPacket.getRttTimes()
 
-        if repliesReceived > 0:
+        if packetsSent > 0:
 
             # Calculate percent lost
-            percentLost = 1 - (repliesReceived / packetsSent)
+            percentLost = (1 - (repliesReceived / packetsSent))*100
 
             print('')
             print(f'Packet statistics:\n'
@@ -604,6 +619,7 @@ class IcmpHelperLibrary:
                   f'Packets received: {repliesReceived}, '
                   f'% Lost = {percentLost}%')
 
+        if repliesReceived > 0:
             # Calculate summary stats (min, avg, max)
             avgRTT = sum(rttTimes) / len(rttTimes)
             minRTT = min(rttTimes)
@@ -626,16 +642,15 @@ class IcmpHelperLibrary:
             return
 
         ttl = 255
-        print("Pinging (" + host + ") " + destinationIpAddress, "TTL:", ttl)
+        randomIdentifier = (os.getpid() & 0xffff)  # Get as 16 bit number - Limit based on ICMP header standards
+        packetIdentifier = randomIdentifier
+
+        print("Pinging (" + host + ") " + destinationIpAddress, "TTL:", ttl, "\n")
 
         for i in range(4):
             # Build packet
             icmpPacket = IcmpHelperLibrary.IcmpPacket()
 
-            randomIdentifier = (os.getpid() & 0xffff)      # Get as 16 bit number - Limit based on ICMP header standards
-                                                           # Some PIDs are larger than 16 bit
-
-            packetIdentifier = randomIdentifier
             packetSequenceNumber = i
             print(packetSequenceNumber + 1, end = '')
 
@@ -659,22 +674,21 @@ class IcmpHelperLibrary:
             return
 
         ttl = 1
+        maxTtl = 255
         returnTypeIsZero = False # To track if we have reached the destination
+        randomIdentifier = (os.getpid() & 0xffff)  # Get as 16 bit number - Limit based on ICMP header standards
+        packetIdentifier = randomIdentifier
 
-        print("Starting traceroute to (" + host + ") " + destinationIpAddress)
+        print("Starting traceroute to (" + host + ") " + destinationIpAddress + "\n")
         packetSequenceNumber = 0
 
         # Add while packet response does not contain the correct type, loop
-        while not returnTypeIsZero:
+        while not returnTypeIsZero and ttl <= maxTtl:
 
             for i in range(3): # Send 3 packets per address
 
                 icmpPacket = IcmpHelperLibrary.IcmpPacket()
-                randomIdentifier = (os.getpid() & 0xffff)  # Get as 16 bit number - Limit based on ICMP header standards
-                # Some PIDs are larger than 16 bit
 
-                packetIdentifier = randomIdentifier
-                packetSequenceNumber += 1
                 print(packetSequenceNumber, end='')
 
                 icmpPacket.buildPacket_echoRequest(packetIdentifier, packetSequenceNumber, ttl)  # Build ICMP for IP payload
@@ -683,6 +697,8 @@ class IcmpHelperLibrary:
 
                 icmpPacket.printIcmpPacketHeader_hex() if self.__DEBUG_IcmpHelperLibrary else 0
                 icmpPacket.printIcmpPacket_hex() if self.__DEBUG_IcmpHelperLibrary else 0
+
+                packetSequenceNumber += 1
 
                 # If any of the three packet replies return a type 0, exit loop
                 replyPacket = icmpPacket.getIcmpReplyPacket()
@@ -724,9 +740,10 @@ def main():
 
 
     # Choose one of the following by uncommenting out the line
-    # icmpHelperPing.sendPing("209.233.126.254")
+    icmpHelperPing.sendPing("209.233.126.254")
     # icmpHelperPing.sendPing("www.google.com")
-    icmpHelperPing.sendPing("gaia.cs.umass.edu")
+    # icmpHelperPing.sendPing("122.56.99.243")
+    #icmpHelperPing.sendPing("gaia.cs.umass.edu")
     # icmpHelperPing.traceRoute("209.233.126.254")
     # icmpHelperPing.traceRoute("164.151.129.20")
     # icmpHelperPing.traceRoute("122.56.99.243")
