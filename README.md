@@ -4,7 +4,7 @@ Ping and trace the network route to a target host!
 
 ## Description
 
-This traceroute tool leverages low-level sockets and network requests to trace the path packets take from your machine to a target host. It provides a detailed breakdown of each hop in the network route, including the IP addresses and response times of intermediary routers. This program is a lightweight alternative to traditional traceroute utilities, written purely in Python for learning and customization.
+This traceroute tool leverages low-level sockets and network requests to trace the path packets take from your machine to a target host. It provides a detailed breakdown of each hop in the network route, including the IP addresses and response times of intermediary routers. This program is written purely in Python for learning and customization.
 
 ## Features
 
