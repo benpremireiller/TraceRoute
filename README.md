@@ -1,6 +1,6 @@
 # Traceroute
 
-Ping and trace the route to networks!
+Ping and trace the network route to a target host!
 
 ## Description
 
